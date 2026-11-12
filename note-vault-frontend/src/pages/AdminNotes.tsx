@@ -15,13 +15,13 @@ import { usePaginated } from '@/hooks/usePaginated'
 import { notifyError, request } from '@/lib/api'
 import { getOwnerId } from '@/lib/utils'
 import type { Note, PaginatedResponse, User } from '@/types'
-import { Check, ChevronDown, Search } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { Popover as PopoverPrimitive } from 'radix-ui'
 
 export function AdminNotes() {
   const { user } = useAuth()
-  const [ownerSearch, setOwnerSearch] = useState('')
   const [ownerOptions, setOwnerOptions] = useState<User[]>([])
+  const [ownerPage, setOwnerPage] = useState(1)
   const [selectedOwner, setSelectedOwner] = useState<User | null>(null)
   const [ownerPickerOpen, setOwnerPickerOpen] = useState(false)
   const [ownersLoading, setOwnersLoading] = useState(false)
@@ -45,15 +45,16 @@ export function AdminNotes() {
 
   useEffect(() => {
     let active = true
-    const timer = window.setTimeout(async () => {
+    const loadOwners = async () => {
       setOwnersLoading(true)
       setOwnersError(null)
       try {
-        const params = new URLSearchParams({ page: '1', limit: '20' })
-        if (ownerSearch.trim()) params.set('search', ownerSearch.trim())
+        const params = new URLSearchParams({ page: String(ownerPage), limit: '20' })
         const result = await request<PaginatedResponse<User>>(`/users?${params}`)
         if (!active) return
-        setOwnerOptions(result.data)
+        setOwnerOptions((current) => ownerPage === 1
+          ? result.data
+          : [...current, ...result.data.filter((owner) => !current.some((item) => item._id === owner._id))])
         setOwnersHaveMore(result.pagination.hasNextPage)
       } catch (cause) {
         if (!active) return
@@ -62,13 +63,14 @@ export function AdminNotes() {
       } finally {
         if (active) setOwnersLoading(false)
       }
-    }, 250)
+    }
+
+    void loadOwners()
 
     return () => {
       active = false
-      window.clearTimeout(timer)
     }
-  }, [ownerSearch])
+  }, [ownerPage])
 
   const applyFilter = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -77,7 +79,6 @@ export function AdminNotes() {
   }
 
   const clearFilter = () => {
-    setOwnerSearch('')
     setSelectedOwner(null)
     setOwnerFilter('')
     setPage(1)
@@ -158,22 +159,7 @@ export function AdminNotes() {
                 className="z-50 w-[var(--radix-popover-trigger-width)] rounded-md border bg-popover text-popover-foreground shadow-md"
               >
                 <div className="flex items-center gap-2 border-b px-3">
-                  <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <Input
-                    autoFocus
-                    maxLength={60}
-                    aria-label="Search Owners"
-                    placeholder="Search By Name Or Email"
-                    value={ownerSearch}
-                    onChange={(event) => {
-                      setOwnerSearch(event.target.value)
-                      setOwnerOptions([])
-                      setOwnersHaveMore(false)
-                      setOwnersError(null)
-                      setOwnersLoading(true)
-                    }}
-                    className="border-0 px-0 shadow-none focus-visible:ring-0"
-                  />
+                  <p className="py-3 text-sm font-medium">Select an owner</p>
                 </div>
                 <div id="owner-options" role="listbox" aria-label="Owners" className="max-h-64 overflow-y-auto p-1">
                   <button
@@ -182,7 +168,6 @@ export function AdminNotes() {
                     aria-selected={selectedOwner === null}
                     onClick={() => {
                       setSelectedOwner(null)
-                      setOwnerSearch('')
                       setOwnerPickerOpen(false)
                     }}
                     className="flex w-full items-center justify-between rounded-sm px-2 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
@@ -202,7 +187,6 @@ export function AdminNotes() {
                       aria-selected={selectedOwner?._id === owner._id}
                       onClick={() => {
                         setSelectedOwner(owner)
-                        setOwnerSearch('')
                         setOwnerPickerOpen(false)
                       }}
                       className="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
@@ -216,9 +200,17 @@ export function AdminNotes() {
                   ))}
                 </div>
                 {ownersHaveMore && (
-                  <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-                    Showing 20 matches. Search to narrow the list.
-                  </p>
+                  <div className="border-t p-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={ownersLoading}
+                      onClick={() => setOwnerPage((current) => current + 1)}
+                    >
+                      {ownersLoading ? 'Loading Owners...' : 'Load More Owners'}
+                    </Button>
+                  </div>
                 )}
                 {ownersError && <p role="alert" className="border-t px-3 py-2 text-xs text-destructive">{ownersError}</p>}
               </PopoverPrimitive.Content>

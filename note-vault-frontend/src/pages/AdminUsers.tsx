@@ -25,28 +25,13 @@ export function AdminUsers() {
   const [role, setRole] = useState<Role>('user')
   const [interests, setInterests] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
 
   const loadPage = useCallback((page: number) => {
     const params = new URLSearchParams({ page: String(page), limit: '10' })
-    if (search) params.set('search', search)
     return request<PaginatedResponse<User>>(`/users?${params}`)
-  }, [search])
+  }, [])
 
   const { page, data, pagination, loading, error, setPage, reload } = usePaginated(loadPage)
-
-  const applySearch = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setPage(1)
-    setSearch(searchInput.trim())
-  }
-
-  const clearSearch = () => {
-    setSearchInput('')
-    setSearch('')
-    setPage(1)
-  }
 
   const openNewUser = () => {
     setEditingUser(null)
@@ -122,25 +107,10 @@ export function AdminUsers() {
         action={<Button type="button" onClick={openNewUser}>Add User</Button>}
       />
 
-      <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Input
-          aria-label="Search Users By Name Or Email"
-          maxLength={60}
-          placeholder="Search By Name Or Email"
-          value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-          className="sm:max-w-md"
-        />
-        <div className="flex gap-2">
-          <Button type="submit" className="flex-1 sm:flex-initial">Search</Button>
-          <Button type="button" variant="outline" onClick={clearSearch}>Clear Search</Button>
-        </div>
-      </form>
-
       {loading && <p className="text-muted-foreground">Loading users...</p>}
       {!loading && error && <p role="status">{error}</p>}
       {!loading && !error && data.length === 0 && (
-        <p className="text-muted-foreground">{search ? 'No users match your search.' : 'No users found.'}</p>
+        <p className="text-muted-foreground">No users found.</p>
       )}
       {data.length > 0 && (
         <Card>

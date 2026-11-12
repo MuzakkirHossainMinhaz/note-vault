@@ -76,7 +76,7 @@ All API routes are under `/api`.
 | GET | `/api/users/me` | Authenticated | Current user profile |
 | PATCH | `/api/users/me` | Authenticated | Update name, interests, password |
 | POST | `/api/users` | Admin | Create a user |
-| GET | `/api/users` | Admin | Paginated user list; optional `?search=` matches name or email |
+| GET | `/api/users` | Admin | Paginated user list |
 | GET | `/api/users/:id` | Admin | User details |
 | PATCH | `/api/users/:id` | Admin | Update a user; dedupe email and maintain last-admin protection |
 | DELETE | `/api/users/:id` | Admin | Removes user and cascades notes/posts |

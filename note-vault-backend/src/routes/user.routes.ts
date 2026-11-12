@@ -43,18 +43,11 @@ const updateUserSchema = z
   })
   .strict();
 
-const listUsersQuerySchema = paginationQuerySchema.extend({
-  search: z.preprocess((value) => {
-    if (typeof value !== "string") return value;
-    return value.trim() || undefined;
-  }, z.string().max(60).optional()),
-});
-
 router.get("/me", authenticate, getMe);
 router.patch("/me", authenticate, validate({ body: updateMeSchema }), updateMe);
 router.get("/:id/posts", validate({ params: idParamSchema, query: paginationQuerySchema }), listUserPosts);
 router.post("/", authenticate, requireRole("admin"), validate({ body: createUserSchema }), createUser);
-router.get("/", authenticate, requireRole("admin"), validate({ query: listUsersQuerySchema }), listUsers);
+router.get("/", authenticate, requireRole("admin"), validate({ query: paginationQuerySchema }), listUsers);
 router.get("/:id", authenticate, requireRole("admin"), validate({ params: idParamSchema }), getUser);
 router.patch(
   "/:id",

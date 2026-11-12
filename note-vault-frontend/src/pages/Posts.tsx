@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/context/AuthContext'
 import { notifyError, request } from '@/lib/api'
-import type { CursorPaginatedResponse, Post, PostFeedItem } from '@/types'
+import type { CursorPaginatedResponse, Post, PostFeedItem, UserPostsResponse } from '@/types'
 
 export function Posts() {
   const { user } = useAuth()
@@ -33,6 +33,10 @@ export function Posts() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [submittingPost, setSubmittingPost] = useState(false)
+  const [userIdInput, setUserIdInput] = useState('')
+  const [userPosts, setUserPosts] = useState<UserPostsResponse | null>(null)
+  const [userPostsLoading, setUserPostsLoading] = useState(false)
+  const [userPostsError, setUserPostsError] = useState<string | null>(null)
   const cursorRef = useRef<string | null>(null)
   const hasMoreRef = useRef(true)
   const loadingRef = useRef(false)
@@ -154,6 +158,32 @@ export function Posts() {
     }
   }
 
+  const loadUserPosts = useCallback(async (userId: string, page: number) => {
+    setUserPostsLoading(true)
+    setUserPostsError(null)
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: '10' })
+      const result = await request<UserPostsResponse>(
+        `/users/${encodeURIComponent(userId)}/posts?${params}`,
+        { authenticated: false },
+      )
+      setUserPosts(result)
+    } catch (cause) {
+      setUserPostsError(cause instanceof Error ? cause.message : 'Could not load user posts.')
+      notifyError(cause)
+    } finally {
+      setUserPostsLoading(false)
+    }
+  }, [])
+
+  const submitUserPosts = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const userId = userIdInput.trim()
+    if (!userId) return
+    setUserPosts(null)
+    void loadUserPosts(userId, 1)
+  }
+
   return (
     <section className="space-y-6">
       <PageHeader
@@ -162,6 +192,73 @@ export function Posts() {
         description="Read what the community is sharing, or add a post of your own."
         action={<Button type="button" onClick={openCreatePost}>Create Post</Button>}
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>View Posts of a User</CardTitle>
+          <CardDescription>Enter a user ID to view their public posts.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={submitUserPosts} className="flex flex-col gap-3 sm:flex-row">
+            <div className="min-w-0 flex-1 space-y-2">
+              <Label htmlFor="user-posts-id">User ID</Label>
+              <Input
+                id="user-posts-id"
+                value={userIdInput}
+                onChange={(event) => setUserIdInput(event.target.value)}
+                placeholder="Enter user ID"
+                autoComplete="off"
+              />
+            </div>
+            <Button type="submit" disabled={userPostsLoading} className="sm:mt-7">
+              {userPostsLoading ? 'Loading Posts...' : 'View Posts'}
+            </Button>
+          </form>
+
+          {userPostsError && <p role="alert" className="text-sm text-destructive">{userPostsError}</p>}
+          {userPosts && (
+            <section aria-label="Posts by user" className="space-y-4">
+              <h3 className="text-lg font-semibold">{userPosts.user.name}</h3>
+              {userPosts.posts.length === 0
+                ? <p className="text-sm text-muted-foreground">This user has no posts on this page.</p>
+                : (
+                  <div className="space-y-3">
+                    {userPosts.posts.map((post) => (
+                      <article key={post._id} className="rounded-lg border p-4">
+                        <h4 className="font-medium">{post.title}</h4>
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{post.content}</p>
+                        {post.createdAt && (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {new Date(post.createdAt).toLocaleString()}
+                          </p>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              <div className="flex items-center justify-between gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!userPosts.pagination.hasPrevPage || userPostsLoading}
+                  onClick={() => void loadUserPosts(userPosts.user._id, userPosts.pagination.page - 1)}
+                >
+                  Prev
+                </Button>
+                <p className="text-sm text-muted-foreground">Page {userPosts.pagination.page}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!userPosts.pagination.hasNextPage || userPostsLoading}
+                  onClick={() => void loadUserPosts(userPosts.user._id, userPosts.pagination.page + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </section>
+          )}
+        </CardContent>
+      </Card>
 
       <section aria-label="Community feed" className="space-y-4">
         <div className="flex items-center justify-between gap-3">

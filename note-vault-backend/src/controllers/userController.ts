@@ -44,18 +44,7 @@ const createUser = asyncHandler(async (req, res) => {
 
 const listUsers = asyncHandler(async (req, res) => {
   const pagination = parsePagination(req.query);
-  const search = typeof req.query.search === "string" ? req.query.search : undefined;
-  const filter = search
-    ? {
-        $or: ["name", "email"].map((field) => ({
-          [field]: {
-            $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-            $options: "i",
-          },
-        })),
-      }
-    : {};
-  const result = await paginate(User, filter, pagination);
+  const result = await paginate(User, {}, pagination);
   res.json({
     data: result.data.map(presentUser),
     pagination: result.pagination,
