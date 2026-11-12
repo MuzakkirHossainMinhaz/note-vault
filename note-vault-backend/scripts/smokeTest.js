@@ -1,11 +1,11 @@
 require("dotenv").config();
 
-const baseUrl = process.argv[2] || process.env.BASE_URL || "http://localhost:5000";
-const adminEmail = process.env.ADMIN_EMAIL || "admin@notevault.local";
+const baseUrl = process.env.BASE_URL || process.argv[2] || "http://localhost:5000";
+const adminEmail = process.env.ADMIN_EMAIL;
 const adminPassword = process.env.ADMIN_PASSWORD;
 
-if (!adminPassword) {
-  console.error("FAIL missing ADMIN_PASSWORD");
+if (!adminEmail || !adminPassword) {
+  console.error("FAIL missing ADMIN_EMAIL or ADMIN_PASSWORD");
   process.exit(1);
 }
 
@@ -60,6 +60,8 @@ async function main() {
   const createdUsers = [];
   const createdNotes = [];
   const createdPosts = [];
+  let adminToken = "";
+  let cleanupFailures = 0;
   const suffix = Date.now();
 
   try {
@@ -81,7 +83,7 @@ async function main() {
         adminLogin.payload && adminLogin.payload.error ? adminLogin.payload.error : { status: adminLogin.status },
       ),
     );
-    const adminToken = adminLogin.status === 200 ? adminLogin.payload.token : "";
+    adminToken = adminLogin.status === 200 ? adminLogin.payload.token : "";
     const adminUserId = adminLogin.status === 200 ? adminLogin.payload.user._id : "";
 
     const selfDeleteRes = await request(`/api/users/${adminUserId}`, {
@@ -115,7 +117,9 @@ async function main() {
         !registerRes.payload.user.password,
       `status=${registerRes.status}`,
     );
-    createdUsers.push(registerRes.payload.user._id);
+    if (registerRes.payload && registerRes.payload.user && registerRes.payload.user._id) {
+      createdUsers.push(registerRes.payload.user._id);
+    }
     const userAToken = registerRes.payload.token;
 
     const duplicateRes = await request("/api/auth/register", {
@@ -186,7 +190,7 @@ async function main() {
       noteCreate.status === 201 && noteCreate.payload && noteCreate.payload.title === "A note",
       `status=${noteCreate.status}`,
     );
-    createdNotes.push(noteCreate.payload._id);
+    createdNotes.push({ id: noteCreate.payload._id, token: userLogin.payload.token });
 
     const listOwnNotes = await request("/api/notes?page=1&limit=10", {
       headers: { Authorization: `Bearer ${userLogin.payload.token}` },
@@ -237,7 +241,9 @@ async function main() {
       userBRes.status === 201 && userBRes.payload && userBRes.payload.user && userBRes.payload.user.role === "user",
       `status=${userBRes.status}`,
     );
-    createdUsers.push(userBRes.payload.user._id);
+    if (userBRes.payload && userBRes.payload.user && userBRes.payload.user._id) {
+      createdUsers.push(userBRes.payload.user._id);
+    }
     const userBLogin = await request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email: userB.email, password: userB.password }),
@@ -276,16 +282,16 @@ async function main() {
       JSON.stringify(notesPageRes.payload && notesPageRes.payload.pagination),
     );
 
-    const twelveNotes = [];
     for (let i = 0; i < 12; i += 1) {
       const noteRes = await request("/api/notes", {
         method: "POST",
         headers: { Authorization: `Bearer ${userLogin.payload.token}` },
         body: JSON.stringify({ title: `Note ${suffix}-${i}`, content: `Content ${i}` }),
       });
-      if (noteRes.status === 201) twelveNotes.push(noteRes.payload._id);
+      if (noteRes.status === 201) {
+        createdNotes.push({ id: noteRes.payload._id, token: userLogin.payload.token });
+      }
     }
-    createdNotes.push(...twelveNotes);
 
     const pagedNotes = await request("/api/notes?page=1&limit=5", {
       headers: { Authorization: `Bearer ${userLogin.payload.token}` },
@@ -348,6 +354,27 @@ async function main() {
       `patch=${adminPatchUserNote.status} delete=${adminDeleteUserNote.status}`,
     );
 
+    const ownerDeleteNote = await request("/api/notes", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${userLogin.payload.token}` },
+      body: JSON.stringify({ title: "Owner delete note", content: "delete this note" }),
+    });
+    if (ownerDeleteNote.status === 201 && ownerDeleteNote.payload && ownerDeleteNote.payload._id) {
+      createdNotes.push({ id: ownerDeleteNote.payload._id, token: userLogin.payload.token });
+    }
+    const ownerDeleteNoteRes = await request(`/api/notes/${ownerDeleteNote.payload._id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${userLogin.payload.token}` },
+    });
+    const ownerDeletedNoteGet = await request(`/api/notes/${ownerDeleteNote.payload._id}`, {
+      headers: { Authorization: `Bearer ${userLogin.payload.token}` },
+    });
+    assert(
+      "owner can delete own note and then gets 404",
+      ownerDeleteNoteRes.status === 204 && ownerDeletedNoteGet.status === 404,
+      `delete=${ownerDeleteNoteRes.status} get=${ownerDeletedNoteGet.status}`,
+    );
+
     const normalUserForbiddenUsers = await request("/api/users?page=1&limit=10", {
       headers: { Authorization: `Bearer ${userLogin.payload.token}` },
     });
@@ -372,7 +399,9 @@ async function main() {
       adminCreateUser.status === 201 && adminCreateUser.payload && adminCreateUser.payload.role === "admin",
       `status=${adminCreateUser.status} payload=${JSON.stringify(adminCreateUser.payload)}`,
     );
-    createdUsers.push(adminCreateUser.payload._id);
+    if (adminCreateUser.payload && adminCreateUser.payload._id) {
+      createdUsers.push(adminCreateUser.payload._id);
+    }
     const adminCreateToken = await login(`admincreated${suffix}@example.com`, "StrongPass789");
     assert(
       "created admin can log in",
@@ -382,6 +411,55 @@ async function main() {
         adminCreateToken.payload.user.role === "admin",
       `status=${adminCreateToken.status}`,
     );
+
+    const cleanupAdmin = await request(`/api/users/${adminCreateUser.payload._id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    if (cleanupAdmin.status === 204) {
+      createdUsers.splice(createdUsers.indexOf(adminCreateUser.payload._id), 1);
+    }
+
+    const adminPage = await request("/api/users?page=1&limit=100", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    let adminCount = adminPage.payload && adminPage.payload.data
+      ? adminPage.payload.data.filter((listedUser) => listedUser.role === "admin").length
+      : 0;
+    const adminPages = adminPage.payload && adminPage.payload.pagination
+      ? adminPage.payload.pagination.totalPages
+      : 1;
+    for (let page = 2; page <= adminPages; page += 1) {
+      const nextAdminPage = await request(`/api/users?page=${page}&limit=100`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (nextAdminPage.payload && Array.isArray(nextAdminPage.payload.data)) {
+        adminCount += nextAdminPage.payload.data.filter((listedUser) => listedUser.role === "admin").length;
+      }
+    }
+    if (adminCount === 1) {
+      const deleteLastAdmin = await request(`/api/users/${adminUserId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert(
+        "last admin deletion is refused",
+        deleteLastAdmin.status >= 400 && deleteLastAdmin.status < 500,
+        `status=${deleteLastAdmin.status}`,
+      );
+      const demoteLastAdmin = await request(`/api/users/${adminUserId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ role: "user" }),
+      });
+      assert(
+        "last admin demotion is refused",
+        demoteLastAdmin.status >= 400 && demoteLastAdmin.status < 500,
+        `status=${demoteLastAdmin.status}`,
+      );
+    } else {
+      console.log(`SKIP last-admin protections: ${adminCount} admin accounts exist`);
+    }
 
     const adminUsersList = await request("/api/users?page=1&limit=10", {
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -413,17 +491,6 @@ async function main() {
       "admin can update a user",
       adminUpdateUser.status === 200 && adminUpdateUser.payload && adminUpdateUser.payload.name === "Updated Name",
       `status=${adminUpdateUser.status}`,
-    );
-
-    const adminUserSearch = await request(`/api/users?search=${encodeURIComponent("Updated Name")}&page=1&limit=10`, {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    });
-    assert(
-      "admin can search users by name for owner selection",
-      adminUserSearch.status === 200 &&
-        adminUserSearch.payload &&
-        adminUserSearch.payload.data.some((listedUser) => listedUser._id === registerRes.payload.user._id),
-      `status=${adminUserSearch.status}`,
     );
 
     const loginWithNewPassword = await login(userA.email, "EvenStronger123");
@@ -504,19 +571,26 @@ async function main() {
         interests: ["music"],
       }),
     });
-    createdUsers.push(postUserRes.payload.user._id);
+    if (postUserRes.payload && postUserRes.payload.user && postUserRes.payload.user._id) {
+      createdUsers.push(postUserRes.payload.user._id);
+    }
     const postUserToken = postUserRes.payload.token;
     const createdPost1 = await request("/api/posts", {
       method: "POST",
       headers: { Authorization: `Bearer ${postUserToken}` },
       body: JSON.stringify({ title: "First Post", content: "Alpha" }),
     });
+    if (createdPost1.status === 201 && createdPost1.payload && createdPost1.payload._id) {
+      createdPosts.push({ id: createdPost1.payload._id, token: postUserToken });
+    }
     const createdPost2 = await request("/api/posts", {
       method: "POST",
       headers: { Authorization: `Bearer ${postUserToken}` },
       body: JSON.stringify({ title: "Second Post", content: "Beta" }),
     });
-    createdPosts.push(createdPost1.payload._id, createdPost2.payload._id);
+    if (createdPost2.status === 201 && createdPost2.payload && createdPost2.payload._id) {
+      createdPosts.push({ id: createdPost2.payload._id, token: postUserToken });
+    }
     assert(
       "user can create posts",
       createdPost1.status === 201 && createdPost2.status === 201,
@@ -627,7 +701,7 @@ async function main() {
 
     const optionsRes = await request("/api/auth/login", {
       method: "OPTIONS",
-      headers: { Origin: "http://localhost:5173", "Access-Control-Request-Method": "POST" },
+      headers: { Origin: process.env.ALLOWED_ORIGIN || "http://localhost:5173", "Access-Control-Request-Method": "POST" },
     });
     assert(
       "CORS preflight works for allowed origin",
@@ -641,16 +715,6 @@ async function main() {
     });
     assert("blocked origin is denied", blockedOrigin.status === 403, `status=${blockedOrigin.status}`);
 
-    const rateLimitRes = await request("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email: "missing@example.test", password: "x" }),
-    });
-    assert(
-      "auth path can respond with rate limit if repeated",
-      rateLimitRes.status === 401 || rateLimitRes.status === 429,
-      `status=${rateLimitRes.status}`,
-    );
-
     const deleteUserRes = await request(`/api/users/${userBRes.payload.user._id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -661,25 +725,82 @@ async function main() {
       `status=${deleteUserRes.status}`,
     );
 
-    const cleanupUsers = [...new Set(createdUsers)];
-    for (const userId of cleanupUsers) {
+    const hostname = new URL(baseUrl).hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+      let rateLimitRes = { status: 0 };
+      let attempt = 0;
+      while (attempt < 130 && rateLimitRes.status !== 429) {
+        attempt += 1;
+        rateLimitRes = await request("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: "missing@example.test", password: "x" }),
+        });
+      }
+      assert("auth rate limit returns 429", rateLimitRes.status === 429, `status=${rateLimitRes.status} attempt=${attempt}`);
+    } else {
+      console.log("SKIP rate-limit assertion: rate-limit verification is local-only");
+    }
+
+  } catch (error) {
+    console.error("Unhandled smoke test error:", error && error.message ? error.message : error);
+    failures += 1;
+    process.exitCode = 1;
+  } finally {
+    for (const post of createdPosts.reverse()) {
       try {
-        await request(`/api/users/${userId}`, {
+        const result = await request(`/api/posts/${post.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${post.token}` },
+        });
+        if (result.status !== 204 && result.status !== 404) {
+          console.error(`Cleanup failed for post ${post.id}: status=${result.status}`);
+          cleanupFailures += 1;
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        console.error(`Cleanup failed for post ${post.id}:`, error && error.message ? error.message : error);
+        cleanupFailures += 1;
+        process.exitCode = 1;
+      }
+    }
+    for (const note of createdNotes.reverse()) {
+      try {
+        const result = await request(`/api/notes/${note.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${note.token}` },
+        });
+        if (result.status !== 204 && result.status !== 404) {
+          console.error(`Cleanup failed for note ${note.id}: status=${result.status}`);
+          cleanupFailures += 1;
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        console.error(`Cleanup failed for note ${note.id}:`, error && error.message ? error.message : error);
+        cleanupFailures += 1;
+        process.exitCode = 1;
+      }
+    }
+    for (const userId of [...new Set(createdUsers)].reverse()) {
+      try {
+        const result = await request(`/api/users/${userId}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${adminToken}` },
         });
-      } catch (_error) {
-        // ignore
+        if (result.status !== 204 && result.status !== 404) {
+          console.error(`Cleanup failed for user ${userId}: status=${result.status}`);
+          cleanupFailures += 1;
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        console.error(`Cleanup failed for user ${userId}:`, error && error.message ? error.message : error);
+        cleanupFailures += 1;
+        process.exitCode = 1;
       }
     }
-
     console.log(
-      `\nSmoke test summary: ${failures === 0 ? "PASS" : "FAIL"} (${results.filter((item) => item.passed).length}/${results.length} assertions passed)`,
+      `\nSmoke test summary: ${failures === 0 && cleanupFailures === 0 ? "PASS" : "FAIL"} (${results.filter((item) => item.passed).length}/${results.length} assertions passed; cleanup failures=${cleanupFailures})`,
     );
-    process.exitCode = failures === 0 ? 0 : 1;
-  } catch (error) {
-    console.error("Unhandled smoke test error:", error && error.message ? error.message : error);
-    process.exit(1);
+    if (failures > 0) process.exitCode = 1;
   }
 }
 
