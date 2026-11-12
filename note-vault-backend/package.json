@@ -1,0 +1,38 @@
+{
+  "name": "note-vault-backend",
+  "version": "1.0.0",
+  "description": "note-vault-backend — secure note-taking REST API with role-based access control",
+  "main": "dist/src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/src/server.js",
+    "dev": "tsx watch src/server.ts",
+    "seed:admin": "tsx scripts/seedAdmin.ts",
+    "db:indexes": "tsx scripts/syncIndexes.ts",
+    "test:smoke": "node scripts/smokeTest.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.25",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
