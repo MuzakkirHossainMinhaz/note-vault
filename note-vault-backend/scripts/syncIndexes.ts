@@ -1,5 +1,8 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import User from "../src/models/User";
+import Note from "../src/models/Note";
+import Post from "../src/models/Post";
 
 dotenv.config();
 
@@ -13,12 +16,6 @@ async function main() {
     serverSelectionTimeoutMS: 8000,
     autoIndex: false,
   });
-
-  const [{ default: User }, { default: Note }, { default: Post }] = await Promise.all([
-    import("../src/models/User"),
-    import("../src/models/Note"),
-    import("../src/models/Post"),
-  ]);
 
   for (const Model of [User, Note, Post]) {
     await Model.syncIndexes();
