@@ -13,6 +13,7 @@
     "start": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
     "seed:admin": "tsx scripts/seedAdmin.ts",
+    "seed:demo": "tsx scripts/seedDemo.ts",
     "db:indexes": "tsx scripts/syncIndexes.ts",
     "test:smoke": "node scripts/smokeTest.js"
   },
